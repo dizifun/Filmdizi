@@ -1,5 +1,8 @@
 name: RecTV Guncelleyici
 
+permissions:
+  contents: write # Git push yapabilmek için yazma izni şart
+
 on:
   schedule:
     - cron: '0 */6 * * *' # Her 6 saatte bir çalışır
@@ -24,6 +27,7 @@ jobs:
         pip install requests
 
     - name: Run Scraper Script
+      # Dosya adının depodakiyle BİREBİR aynı olduğundan emin ol (küçük harf/Türkçe karakter)
       run: python canlıfilm.py
 
     - name: Commit and Push changes
@@ -31,8 +35,10 @@ jobs:
         git config --global user.name "GitHub Action"
         git config --global user.email "action@github.com"
         
-        # Değişiklik varsa commit et
-        git add canli.m3u filmler.m3u diziler.m3u
-        git commit -m "Otomatik M3U Guncellemesi - $(date)" || echo "Değişiklik yok"
-        git push
+        # Dosyalar oluşmamışsa hata vermemesi için || true ekledik (opsiyonel güvenlik)
+        git add canli.m3u filmler.m3u diziler.m3u || true
         
+        # Değişiklik yoksa hata verip durmasın diye kontrol ekledik
+        git commit -m "Otomatik M3U Guncellemesi - $(date)" || echo "Değişiklik yok, commit atlanıyor."
+        
+        git push

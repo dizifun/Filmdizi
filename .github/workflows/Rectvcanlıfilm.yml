@@ -24,7 +24,7 @@ jobs:
         pip install requests
 
     - name: Run Scraper Script
-      run: python main.py
+      run: python canlıfilm.py
 
     - name: Commit and Push changes
       run: |

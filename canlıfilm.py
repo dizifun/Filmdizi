@@ -17,7 +17,6 @@ MAX_WORKERS = 10  # Aynı anda kaç sayfa taransın (Hız için artırılabilir)
 # Dosya İsimleri
 FILE_LIVE = 'canli.m3u'
 FILE_MOVIES = 'filmler.m3u'
-FILE_SERIES = 'diziler.m3u'
 
 class RecTVScraper:
     def __init__(self):

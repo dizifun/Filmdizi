@@ -12,9 +12,9 @@ PROXY_URL = 'https://api.codetabs.com/v1/proxy/?quest=' + requests.utils.quote(G
 # Sabitler
 M3U_USER_AGENT = 'googleusercontent'
 TIMEOUT = 15
-MAX_WORKERS = 10  # Aynı anda kaç sayfa taransın (Hız için artırılabilir)
+MAX_WORKERS = 10  # Aynı anda kaç sayfa taransın
 
-# Dosya İsimleri
+# Dosya İsimleri (Diziler kaldırıldı)
 FILE_LIVE = 'canli.m3u'
 FILE_MOVIES = 'filmler.m3u'
 
@@ -26,12 +26,12 @@ class RecTVScraper:
         }
         self.main_url = "https://m.prectv60.lol" # Fallback
         self.sw_key = ""
-        self.found_items = {"live": 0, "movies": 0, "series": 0}
+        # Sayaçlardan series kaldırıldı
+        self.found_items = {"live": 0, "movies": 0}
         
-        # M3U İçerik Tamponları
+        # M3U İçerik Tamponları (Series buffer kaldırıldı)
         self.buffer_live = ["#EXTM3U"]
         self.buffer_movies = ["#EXTM3U"]
-        self.buffer_series = ["#EXTM3U"]
 
     def log(self, message):
         print(f"[{time.strftime('%H:%M:%S')}] {message}")
@@ -74,14 +74,12 @@ class RecTVScraper:
 
     def find_working_domain(self):
         """1'den 60'a kadar domainleri tarar veya GitHub'dan geleni doğrular"""
-        # Önce GitHub'dan geleni dene
         if self.test_domain(self.main_url):
             self.log(f"GitHub domaini çalışıyor: {self.main_url}")
             return
 
         self.log("GitHub domaini yanıt vermedi. 1-60 arası taranıyor...")
         
-        # 60'tan geriye veya 1'den ileriye tarayabiliriz. Genelde en yüksek sayı en günceldir.
         for i in range(65, 0, -1):
             domain = f"https://m.prectv{i}.lol"
             if self.test_domain(domain):
@@ -111,7 +109,6 @@ class RecTVScraper:
         elif "altyazı" in lower_title or "al tyazı" in lower_title:
             tag = " [Altyazılı]"
         
-        # Temiz başlık (Gereksiz parantezleri temizleyebilirsiniz isterseniz)
         return title + tag
 
     def process_content(self, items, content_type, category_name="Genel"):
@@ -133,8 +130,8 @@ class RecTVScraper:
                     # Entry Oluşturma
                     entry = f'#EXTINF:-1 tvg-id="{tid}" tvg-name="{title}" tvg-logo="{image}" group-title="{category_name}", {title}'
                     
-                    # Film/Dizi ise dil etiketi ekle
-                    if content_type != "live":
+                    # Film ise dil etiketi ekle (Diziler kaldırıldığı için sadece filme bakıyoruz)
+                    if content_type == "movies":
                         full_title = self.get_dub_sub_info(title, item.get('categories', []))
                         entry = f'#EXTINF:-1 tvg-id="{tid}" tvg-name="{full_title}" tvg-logo="{image}" group-title="{category_name}", {full_title}'
 
@@ -148,9 +145,8 @@ class RecTVScraper:
                     elif content_type == "movies":
                         self.buffer_movies.append(entry)
                         self.found_items["movies"] += 1
-                    elif content_type == "series":
-                        self.buffer_series.append(entry)
-                        self.found_items["series"] += 1
+                    
+                    # Series koşulu kaldırıldı
                     count += 1
         return count
 
@@ -160,7 +156,6 @@ class RecTVScraper:
         empty_streak = 0
         
         while True:
-            # URL Hazırla
             url = f"{self.main_url}/{api_template.replace('SAYFA', str(page))}{self.sw_key}"
             try:
                 r = requests.get(url, headers=self.headers, timeout=TIMEOUT, verify=False)
@@ -168,7 +163,7 @@ class RecTVScraper:
                 
                 data = r.json()
                 if not data or not isinstance(data, list):
-                    break # Veri bitti
+                    break
 
                 count = self.process_content(data, content_type, category_name)
                 
@@ -177,12 +172,8 @@ class RecTVScraper:
                 else:
                     empty_streak = 0
                 
-                # Eğer 3 sayfa üst üste boş gelirse dur (Güvenlik)
                 if empty_streak >= 3: break
-                
                 page += 1
-                # Çok fazla yüklenmemek için minik bekleme (opsiyonel)
-                # time.sleep(0.1) 
 
             except Exception as e:
                 self.log(f"Hata ({category_name} - Syf {page}): {e}")
@@ -196,17 +187,12 @@ class RecTVScraper:
         # 2. Domain Bul
         self.find_working_domain()
 
-        # 3. Kategori Listesi (PHP kodundaki geniş liste)
-        # Format: (API Yolu, Görünen İsim, Tip)
+        # 3. Kategori Listesi (Diziler API endpointleri kaldırıldı)
         tasks = [
-            # --- CANLI TV (Genelde tek endpoint page page gider) ---
+            # --- CANLI TV ---
             ("api/channel/by/filtres/0/0/SAYFA/", "Canlı TV", "live"),
             
-            # --- DİZİLER ---
-            ("api/serie/by/filtres/0/created/SAYFA/", "Son Eklenen Diziler", "series"),
-            ("api/serie/by/filtres/1/created/SAYFA/", "Aksiyon Dizileri", "series"),
-            
-            # --- FİLMLER (Detaylı Kategoriler) ---
+            # --- FİLMLER ---
             ("api/movie/by/filtres/0/created/SAYFA/", "Son Eklenen Filmler", "movies"),
             ("api/movie/by/filtres/14/created/SAYFA/", "Aile", "movies"),
             ("api/movie/by/filtres/1/created/SAYFA/", "Aksiyon", "movies"),
@@ -224,9 +210,9 @@ class RecTVScraper:
             ("api/movie/by/filtres/23/created/SAYFA/", "Yerli Filmler", "movies"),
         ]
 
-        self.log("Tarama başlıyor... (Bu işlem içerik sayısına göre zaman alabilir)")
+        self.log("Tarama başlıyor... (Sadece Canlı TV ve Filmler)")
 
-        # Paralel İşleme (Thread Pool)
+        # Paralel İşleme
         with concurrent.futures.ThreadPoolExecutor(max_workers=MAX_WORKERS) as executor:
             future_to_url = {
                 executor.submit(self.scrape_category, t[0], t[1], t[2]): t 
@@ -241,16 +227,14 @@ class RecTVScraper:
                 except Exception as exc:
                     self.log(f"Task hatası {task[1]}: {exc}")
 
-        # 4. Dosyaları Kaydet
+        # 4. Dosyaları Kaydet (Diziler dosyası kaydetme iptal edildi)
         self.save_file(FILE_LIVE, self.buffer_live)
         self.save_file(FILE_MOVIES, self.buffer_movies)
-        self.save_file(FILE_SERIES, self.buffer_series)
         
         self.log("="*30)
         self.log(f"TOPLAM BULUNAN:")
         self.log(f"Canlı TV: {self.found_items['live']}")
         self.log(f"Filmler : {self.found_items['movies']}")
-        self.log(f"Diziler : {self.found_items['series']}")
         self.log("="*30)
 
     def save_file(self, filename, content_list):
@@ -259,8 +243,6 @@ class RecTVScraper:
         self.log(f"Dosya kaydedildi: {filename}")
 
 if __name__ == "__main__":
-    # SSL Hatalarını gizle
     requests.packages.urllib3.disable_warnings()
-    
     scraper = RecTVScraper()
     scraper.run()

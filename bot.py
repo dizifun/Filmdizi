@@ -1,4 +1,4 @@
-import requests
+import cloudscraper
 from bs4 import BeautifulSoup
 import re
 import time
@@ -8,12 +8,16 @@ import codecs
 # --- AYARLAR ---
 BASE_URL = "https://www.hdfilmizle.life"
 M3U_DOSYA_ADI = "playlist.m3u"
-KAÇ_SAYFA_TARANSIN = 10  # İstersen bu sayıyı arttırabilirsin
+KAÇ_SAYFA_TARANSIN = 3  # Test için az tutalım, çalışırsa artırırsın
 
-HEADERS = {
-    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-    'Referer': 'https://www.hdfilmizle.life/'
-}
+# Cloudscraper: Siteye "Ben Chrome Tarayıcıyım" diyen özel kütüphane
+scraper = cloudscraper.create_scraper(
+    browser={
+        'browser': 'chrome',
+        'platform': 'windows',
+        'desktop': True
+    }
+)
 
 def m3u_baslat():
     with open(M3U_DOSYA_ADI, "w", encoding="utf-8") as f:
@@ -38,8 +42,12 @@ def sifreyi_kir(sifreli_metin):
 
 def film_detaylarini_getir(url):
     try:
-        response = requests.get(url, headers=HEADERS, timeout=10)
-        if response.status_code != 200: return None, None
+        # requests yerine scraper kullanıyoruz
+        response = scraper.get(url, timeout=15)
+        
+        if response.status_code != 200: 
+            print(f"   ⚠️ Site engelledi! Kod: {response.status_code}")
+            return None, None
 
         soup = BeautifulSoup(response.content, "html.parser")
         
@@ -63,34 +71,57 @@ def film_detaylarini_getir(url):
 
         if player_url:
             if player_url.startswith("//"): player_url = "https:" + player_url
-            h_player = HEADERS.copy()
-            h_player['Referer'] = 'https://www.hdfilmizle.life/'
-            res_p = requests.get(player_url, headers=h_player, timeout=10)
+            
+            # Referer header'ı ekleyerek player'a git
+            # Cloudscraper'ın kendi header yönetimi vardır ama biz yine de ekleyelim
+            headers_player = {'Referer': 'https://www.hdfilmizle.life/'}
+            res_p = scraper.get(player_url, headers=headers_player, timeout=15)
             
             match_code = re.search(r'EE\.dd\([\"\']([a-zA-Z0-9+/=]+)[\"\']\)', res_p.text)
             if match_code:
                 link = sifreyi_kir(match_code.group(1))
                 if link and ".m3u8" in link:
                     return kategori, link.strip()
-    except:
-        pass
+    except Exception as e:
+        print(f"   Hata: {e}")
     return None, None
 
 def baslat():
     m3u_baslat()
-    print(f"🚀 İşlem Başladı! {KAÇ_SAYFA_TARANSIN} sayfa taranıyor...")
+    print(f"🚀 Bulut Delici Modu Başlatıldı! {KAÇ_SAYFA_TARANSIN} sayfa taranıyor...")
     
+    # Önce ana sayfaya bir "Merhaba" diyelim ki cookie alalım
+    try:
+        scraper.get(BASE_URL)
+    except:
+        pass
+    
+    basarili_sayisi = 0
+
     for sayfa in range(1, KAÇ_SAYFA_TARANSIN + 1):
         if sayfa == 1: url = BASE_URL
         else: url = f"{BASE_URL}/page/{sayfa}/"
         
+        print(f"\n🌍 Sayfa {sayfa} taranıyor...")
+        
         try:
-            resp = requests.get(url, headers=HEADERS, timeout=15)
+            resp = scraper.get(url, timeout=20)
+            
+            if resp.status_code != 200:
+                print(f"❌ Ana sayfa erişim hatası: {resp.status_code}")
+                # Eğer 403 alıyorsak Cloudflare bizi tamamen engellemiştir.
+                if resp.status_code == 403:
+                    print("!!! CLOUDFLARE ENGELİ: GitHub IP'si kara listede !!!")
+                    break
+                continue
+
             soup = BeautifulSoup(resp.content, 'html.parser')
             filmler = soup.select("a.poster")
             if not filmler: filmler = soup.select(".film-content a")
             
-            if not filmler: break
+            if not filmler:
+                print("   ⚠️ Film bulunamadı (HTML yapısı değişmiş veya Gizli Engel yemiş olabilir).")
+                break
                 
             for kutu in filmler:
                 href = kutu.get('href')
@@ -106,15 +137,23 @@ def baslat():
                     poster = img.get('data-src') or img.get('src')
                     if poster and not poster.startswith("http"): poster = BASE_URL + poster
                 
+                # Çok hızlı yaparsak ban yeriz, azıcık bekleyelim
+                time.sleep(1) 
+                
                 kategori, video_link = film_detaylarini_getir(full_link)
                 
                 if video_link:
                     if sayfa == 1: kategori = f"YENİ EKLENENLER;{kategori}"
                     m3u_ekle(film_adi, poster, kategori, video_link)
                     print(f"+ Eklendi: {film_adi}")
+                    basarili_sayisi += 1
+                else:
+                    print(f"- Video yok: {film_adi}")
                 
         except Exception as e:
-            print(f"Hata: {e}")
+            print(f"Sayfa hatası: {e}")
+            
+    print(f"\n🏁 BİTTİ! Toplam {basarili_sayisi} film listeye eklendi.")
 
 if __name__ == "__main__":
     baslat()

@@ -1,10 +1,10 @@
-name: Günlük Film Güncellemesi
+name: Günlük Film Güncelleme
 
 on:
   schedule:
-    # Her gün Türkiye saatiyle sabah 06:00'da çalışır (UTC 03:00)
+    # Her gün sabah 06:00'da çalışır
     - cron: '0 3 * * *'
-  workflow_dispatch: # Elle tetiklemek için buton ekler
+  workflow_dispatch: # Elle çalıştırma butonu
 
 permissions:
   contents: write
@@ -14,7 +14,7 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Depoyu Çek (Checkout)
+      - name: Depoyu Çek
         uses: actions/checkout@v3
 
       - name: Python Kur
@@ -23,16 +23,15 @@ jobs:
           python-version: '3.9'
 
       - name: Kütüphaneleri Yükle
-        run: |
-          pip install -r requirements.txt
+        run: pip install -r requirements.txt
 
       - name: Botu Çalıştır
         run: python bot.py
 
-      - name: Sonuçları Kaydet ve Yükle
+      - name: Sonucu Kaydet
         run: |
-          git config --global user.name "GitHub Action Bot"
-          git config --global user.email "action@github.com"
+          git config --global user.name "GitHub Bot"
+          git config --global user.email "bot@github.com"
           git add playlist.m3u
-          git commit -m "Otomatik Güncelleme: $(date)" || echo "Değişiklik yok"
+          git commit -m "Güncelleme: $(date)" || echo "Değişiklik yok"
           git push

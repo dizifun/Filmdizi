@@ -1,51 +1,52 @@
-import requests
+import cloudscraper
 import json
+import os
 import time
 
 DB_DOSYA = "veritabani.json"
+scraper = cloudscraper.create_scraper(browser={'browser': 'chrome','platform': 'windows','desktop': True})
 
 def db_yukle():
-    with open(DB_DOSYA, "r", encoding="utf-8") as f: return json.load(f)
+    if os.path.exists(DB_DOSYA):
+        with open(DB_DOSYA, "r", encoding="utf-8") as f: return json.load(f)
+    return []
 
 def db_kaydet(veri):
     with open(DB_DOSYA, "w", encoding="utf-8") as f: json.dump(veri, f, ensure_ascii=False, indent=4)
 
-def altyazi_ara(m3u8_link):
-    base_url = m3u8_link.rsplit('/', 1)[0] + "/"
-    diller = ["tur", "eng", "und", "tr", "en"]
-    bulunanlar = []
+def altyazi_bul(video_url):
+    base_url = video_url.rsplit('/', 1)[0] + "/"
+    # En yaygın ihtimalleri deneyelim
+    denemeler = ["subtitle-tur-1.vtt", "subtitle-tur.vtt", "subtitle-und-1.vtt", "subtitle-1.vtt"]
     
-    for dil in diller:
-        adaylar = [f"subtitle-{dil}.vtt"] + [f"subtitle-{dil}-{i}.vtt" for i in range(1, 8)]
-        if dil == "tur": adaylar.append("subtitle.vtt")
-        
-        for aday in adaylar:
-            try:
-                r = requests.head(base_url + aday, timeout=1)
-                if r.status_code == 200: bulunanlar.append(base_url + aday)
-            except: pass
-    return bulunanlar if bulunanlar else None
+    for aday in denemeler:
+        try:
+            test_url = base_url + aday
+            res = scraper.head(test_url, timeout=3)
+            if res.status_code == 200: return test_url
+        except: continue
+    return "YOK"
 
 def baslat():
     veriler = db_yukle()
-    taranacak = [v for v in veriler if v['altyazi'] is None]
-    
-    print(f"🕵️ ALTYAZI DEDEKTİFİ: {len(taranacak)} film kontrol edilecek...")
-    
+    toplam = len(veriler)
+    print(f"🕵️ TOPLAM {toplam} FİLM İÇİN ALTYAZI TARAMASI BAŞLADI...")
+
     for i, film in enumerate(veriler):
-        if film['altyazi'] is not None: continue
-        
-        print(f"🔍 [{i+1}] Aranıyor: {film['baslik']}")
-        altyazilar = altyazi_ara(film['video_url'])
-        
-        if altyazilar:
-            film['altyazi'] = altyazilar[0]
-            print(f"   🎉 BULUNDU: {len(altyazilar)} altyazı.")
-            db_kaydet(veriler)
-        else:
-            film['altyazi'] = "YOK" # Yoksa işaretle, tekrar arama
+        # Eğer altyazi yoksa veya taranmamışsa (None, "", "YOK" olmayanlar)
+        if not film.get("altyazi") or film.get("altyazi") == "":
+            print(f"🔍 [{i+1}/{toplam}] {film['baslik']} taranıyor...")
+            sonuc = altyazi_bul(film["video_url"])
+            film["altyazi"] = sonuc
             
-    print("🏁 ALTYAZI TARAMASI BİTTİ.")
+            if sonuc != "YOK":
+                print(f"   ✅ BULDUM: {sonuc}")
+                db_kaydet(veriler) # Her bulduğunda kaydet ki veriler garanti olsun
+            
+            time.sleep(0.1)
+
+    db_kaydet(veriler)
+    print("🏁 TARAMA TAMAMLANDI.")
 
 if __name__ == "__main__":
     baslat()

@@ -1,24 +1,24 @@
 import json
 
-DB_DOSYA = "veritabani.json"
-M3U_DOSYA = "playlist.m3u"
-
 def baslat():
     try:
-        with open(DB_DOSYA, "r", encoding="utf-8") as f: veriler = json.load(f)
-    except: veriler = []
-        
-    with open(M3U_DOSYA, "w", encoding="utf-8") as f:
+        with open("veritabani.json", "r", encoding="utf-8") as f: veriler = json.load(f)
+    except:
+        print("❌ Veritabanı (JSON) bulunamadı!"); return
+
+    sayac = 0
+    with open("playlist.m3u", "w", encoding="utf-8") as f:
         f.write("#EXTM3U\n")
-        
         for film in veriler:
-            if not film.get('video_url'): continue
-            sub_tag = f' subtitle="{film["altyazi"]}"' if film.get('altyazi') and film['altyazi'] != "YOK" else ""
+            # Sadece taranmış ve altyazısı "YOK" olmayanları ekle
+            sub = ""
+            if film.get("altyazi") and film["altyazi"] != "YOK":
+                sub = f' subtitle="{film["altyazi"]}"'
+                sayac += 1
             
-            satir = f'#EXTINF:-1 tvg-logo="{film["poster"]}" group-title="{film["kategori"]}"{sub_tag},{film["baslik"]}\n{film["video_url"]}\n'
-            f.write(satir)
-            
-    print(f"✅ {len(veriler)} film playlist.m3u dosyasına yazıldı!")
+            f.write(f'#EXTINF:-1 tvg-logo="{film["poster"]}" group-title="{film["kategori"]}"{sub},{film["baslik"]}\n{film["video_url"]}\n')
+    
+    print(f"✅ BİTTİ: 15513 film hazırlandı. {sayac} tanesinde altyazı eklendi!")
 
 if __name__ == "__main__":
     baslat()

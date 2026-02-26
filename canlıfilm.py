@@ -12,39 +12,58 @@ PROXY_URL = 'https://api.codetabs.com/v1/proxy/?quest=' + requests.utils.quote(G
 # Sabitler
 M3U_USER_AGENT = 'googleusercontent'
 TIMEOUT = 15
-MAX_WORKERS = 10  # Aynı anda kaç sayfa taransın
+MAX_WORKERS = 10
+MAX_RETRIES = 3 # Hata toleransı eklendi
 
-# Dosya İsimleri (Diziler kaldırıldı)
 FILE_LIVE = 'canli.m3u'
 FILE_MOVIES = 'filmler.m3u'
 
 class RecTVScraper:
     def __init__(self):
-        self.headers = {
+        # Film ve Canlı TV için User-Agent'lar tekrar ayrıldı
+        self.headers_default = {
             'User-Agent': 'okhttp/4.12.0',
             'Referer': 'https://twitter.com/'
         }
-        self.main_url = "https://m.prectv60.lol" # Fallback
-        self.sw_key = ""
-        # Sayaçlardan series kaldırıldı
-        self.found_items = {"live": 0, "movies": 0}
+        self.headers_vod = {
+            'User-Agent': 'Dart/3.7 (dart:io)',
+            'Referer': 'https://twitter.com/'
+        }
         
-        # M3U İçerik Tamponları (Series buffer kaldırıldı)
+        self.main_url = "https://m.prectv60.lol" 
+        self.sw_key = ""
+        
+        self.found_items = {"live": 0, "movies": 0}
         self.buffer_live = ["#EXTM3U"]
         self.buffer_movies = ["#EXTM3U"]
 
     def log(self, message):
         print(f"[{time.strftime('%H:%M:%S')}] {message}")
 
+    def request_with_retry(self, url, headers):
+        """Hata durumunda pes etmeyen istek fonksiyonu eklendi"""
+        for i in range(MAX_RETRIES):
+            try:
+                r = requests.get(url, headers=headers, timeout=TIMEOUT, verify=False)
+                if r.status_code == 200:
+                    return r
+                elif r.status_code == 404:
+                    return None
+                else:
+                    time.sleep(1) 
+            except requests.exceptions.RequestException:
+                time.sleep(1)
+                continue
+        return None
+
     def fetch_github_config(self):
-        """GitHub'dan güncel Key ve URL bilgilerini çeker"""
         self.log("GitHub'dan yapılandırma çekiliyor...")
         content = None
         try:
             r = requests.get(GITHUB_SOURCE_URL, timeout=10)
             if r.status_code == 200: content = r.text
         except: pass
-        
+
         if not content:
             try:
                 r = requests.get(PROXY_URL, timeout=10)
@@ -52,54 +71,44 @@ class RecTVScraper:
             except: pass
 
         if content:
-            # Main URL
             m_url = re.search(r'override\s+var\s+mainUrl\s*=\s*"([^"]+)"', content)
             if m_url: self.main_url = m_url.group(1)
-            
-            # SwKey
+
             s_key = re.search(r'private\s+(val|var)\s+swKey\s*=\s*"([^"]+)"', content)
             if s_key: self.sw_key = s_key.group(2)
-            
-            # User Agent
-            ua = re.search(r'headers\s*=\s*mapOf\([^)]*"user-agent"[^)]*to[^"]*"([^"]+)"', content, re.IGNORECASE)
-            if ua: self.headers['User-Agent'] = ua.group(1)
 
-            # Referer
-            ref = re.search(r'headers\s*=\s*mapOf\([^)]*"Referer"[^)]*to[^"]*"([^"]+)"', content, re.IGNORECASE)
-            if ref: self.headers['Referer'] = ref.group(1)
-            
+            ua = re.search(r'headers\s*=\s*mapOf\([^)]*"user-agent"[^)]*to[^"]*"([^"]+)"', content, re.IGNORECASE)
+            if ua: self.headers_default['User-Agent'] = ua.group(1)
+
             self.log(f"Config Güncellendi: URL={self.main_url} | KEY=...{self.sw_key[-10:]}")
             return True
         return False
 
     def find_working_domain(self):
-        """1'den 60'a kadar domainleri tarar veya GitHub'dan geleni doğrular"""
         if self.test_domain(self.main_url):
             self.log(f"GitHub domaini çalışıyor: {self.main_url}")
             return
 
-        self.log("GitHub domaini yanıt vermedi. 1-60 arası taranıyor...")
-        
-        for i in range(65, 0, -1):
+        self.log("GitHub domaini yanıt vermedi. Taramaya geçiliyor...")
+        # Tarama aralığı güvenliğe karşı tekrar 80'e çıkarıldı
+        for i in range(80, 0, -1):
             domain = f"https://m.prectv{i}.lol"
             if self.test_domain(domain):
                 self.main_url = domain
                 self.log(f"Çalışan domain bulundu: {domain}")
                 return
-        
-        self.log("UYARI: Hiçbir domain çalışmıyor olabilir. Varsayılan ile devam ediliyor.")
+
+        self.log("UYARI: Hiçbir domain çalışmıyor olabilir.")
 
     def test_domain(self, url):
-        """Bir domainin API'sinin çalışıp çalışmadığını test eder"""
         try:
             test_url = f"{url}/api/channel/by/filtres/0/0/0/{self.sw_key}"
-            r = requests.get(test_url, headers=self.headers, timeout=5, verify=False)
+            r = requests.get(test_url, headers=self.headers_default, timeout=5, verify=False)
             return r.status_code == 200 and isinstance(r.json(), list)
         except:
             return False
 
     def get_dub_sub_info(self, title, categories):
-        """Başlık ve kategoriden Dublaj/Altyazı bilgisi çıkarır"""
         tag = ""
         lower_title = title.lower()
         cat_str = "".join([c['title'].lower() for c in categories]) if categories else ""
@@ -108,35 +117,34 @@ class RecTVScraper:
             tag = " [TR Dublaj]"
         elif "altyazı" in lower_title or "al tyazı" in lower_title:
             tag = " [Altyazılı]"
-        
+
         return title + tag
 
     def process_content(self, items, content_type, category_name="Genel"):
-        """Gelen JSON verisini işler ve buffer'a ekler"""
         count = 0
+        current_headers = self.headers_default if content_type == "live" else self.headers_vod
+
         for item in items:
             if 'sources' not in item: continue
-            
+
             for source in item['sources']:
-                if source.get('type') == 'm3u8' and source.get('url'):
+                # MP4 formatı geri eklendi (Filmlerin çoğu mp4'tür)
+                if (source.get('type') == 'm3u8' or source.get('type') == 'mp4') and source.get('url'):
                     title = item.get('title', 'Bilinmeyen')
                     image = item.get('image', '')
                     if image and not image.startswith('http'):
                         image = urljoin(self.main_url, image)
-                    
-                    # ID ve Kategori
+
                     tid = item.get('id', 0)
-                    
-                    # Entry Oluşturma
-                    entry = f'#EXTINF:-1 tvg-id="{tid}" tvg-name="{title}" tvg-logo="{image}" group-title="{category_name}", {title}'
-                    
-                    # Film ise dil etiketi ekle (Diziler kaldırıldığı için sadece filme bakıyoruz)
+
                     if content_type == "movies":
                         full_title = self.get_dub_sub_info(title, item.get('categories', []))
-                        entry = f'#EXTINF:-1 tvg-id="{tid}" tvg-name="{full_title}" tvg-logo="{image}" group-title="{category_name}", {full_title}'
+                    else:
+                        full_title = title
 
+                    entry = f'#EXTINF:-1 tvg-id="{tid}" tvg-name="{full_title}" tvg-logo="{image}" group-title="{category_name}", {full_title}'
                     entry += f'\n#EXTVLCOPT:http-user-agent={M3U_USER_AGENT}'
-                    entry += f'\n#EXTVLCOPT:http-referrer={self.headers["Referer"]}'
+                    entry += f'\n#EXTVLCOPT:http-referrer={current_headers["Referer"]}'
                     entry += f'\n{source["url"]}'
 
                     if content_type == "live":
@@ -145,54 +153,54 @@ class RecTVScraper:
                     elif content_type == "movies":
                         self.buffer_movies.append(entry)
                         self.found_items["movies"] += 1
-                    
-                    # Series koşulu kaldırıldı
+
                     count += 1
         return count
 
     def scrape_category(self, api_template, category_name, content_type, start_page=0):
-        """Belirli bir kategoriyi sonuna kadar tarar (Pagination)"""
         page = start_page
         empty_streak = 0
-        
+        current_headers = self.headers_default if content_type == "live" else self.headers_vod
+
         while True:
             url = f"{self.main_url}/{api_template.replace('SAYFA', str(page))}{self.sw_key}"
+            
+            # Yeniden deneme mekanizması eklendi
+            r = self.request_with_retry(url, current_headers)
+
+            if not r: 
+                empty_streak += 1
+                if empty_streak >= 3: break
+                page += 1
+                continue
+
             try:
-                r = requests.get(url, headers=self.headers, timeout=TIMEOUT, verify=False)
-                if r.status_code != 200: break
-                
                 data = r.json()
                 if not data or not isinstance(data, list):
-                    break
-
-                count = self.process_content(data, content_type, category_name)
-                
-                if count == 0:
                     empty_streak += 1
                 else:
-                    empty_streak = 0
-                
+                    count = self.process_content(data, content_type, category_name)
+                    if count == 0:
+                        empty_streak += 1
+                    else:
+                        empty_streak = 0
+
                 if empty_streak >= 3: break
                 page += 1
 
             except Exception as e:
                 self.log(f"Hata ({category_name} - Syf {page}): {e}")
-                break
+                empty_streak += 1
+                if empty_streak >= 3: break
 
     def run(self):
-        # 1. Ayarları Al
         if not self.fetch_github_config():
             self.log("GitHub config alınamadı, varsayılanlar kullanılıyor.")
-        
-        # 2. Domain Bul
+
         self.find_working_domain()
 
-        # 3. Kategori Listesi (Diziler API endpointleri kaldırıldı)
         tasks = [
-            # --- CANLI TV ---
             ("api/channel/by/filtres/0/0/SAYFA/", "Canlı TV", "live"),
-            
-            # --- FİLMLER ---
             ("api/movie/by/filtres/0/created/SAYFA/", "Son Eklenen Filmler", "movies"),
             ("api/movie/by/filtres/14/created/SAYFA/", "Aile", "movies"),
             ("api/movie/by/filtres/1/created/SAYFA/", "Aksiyon", "movies"),
@@ -212,13 +220,12 @@ class RecTVScraper:
 
         self.log("Tarama başlıyor... (Sadece Canlı TV ve Filmler)")
 
-        # Paralel İşleme
         with concurrent.futures.ThreadPoolExecutor(max_workers=MAX_WORKERS) as executor:
             future_to_url = {
                 executor.submit(self.scrape_category, t[0], t[1], t[2]): t 
                 for t in tasks
             }
-            
+
             for future in concurrent.futures.as_completed(future_to_url):
                 task = future_to_url[future]
                 try:
@@ -227,10 +234,9 @@ class RecTVScraper:
                 except Exception as exc:
                     self.log(f"Task hatası {task[1]}: {exc}")
 
-        # 4. Dosyaları Kaydet (Diziler dosyası kaydetme iptal edildi)
         self.save_file(FILE_LIVE, self.buffer_live)
         self.save_file(FILE_MOVIES, self.buffer_movies)
-        
+
         self.log("="*30)
         self.log(f"TOPLAM BULUNAN:")
         self.log(f"Canlı TV: {self.found_items['live']}")
